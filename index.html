@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <!-- Bản Web toàn màn hình (23/11/2026): canvas phủ kín cửa sổ, tránh tai thỏ (safe area), mở từ màn hình chính như app -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <title>Sơn Thủy</title>
+    <meta name="description" content="Cờ chiến thuật 2 người theo truyền thuyết Sơn Tinh – Thủy Tinh.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Sơn Thủy">
+    <meta name="theme-color" content="#050a09">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/png" href="TemplateData/icon-192.png">
+    <link rel="apple-touch-icon" href="TemplateData/icon-180.png">
+    <style>
+      html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%;
+        background: #050a09; overflow: hidden; overscroll-behavior: none;
+        -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+        font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #e8e4d0;
+      }
+      /* phủ kín cửa sổ trừ vùng tai thỏ / thanh home (env(safe-area-inset-*) = 0 trên máy không có) */
+      #unity-canvas {
+        position: fixed; display: block; outline: none; touch-action: none; background: #050a09;
+        left: env(safe-area-inset-left, 0px); top: env(safe-area-inset-top, 0px);
+        width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+        height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+      }
+      #loading {
+        position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 14px; background: #050a09; z-index: 5;
+      }
+      #loading img { width: 96px; height: 96px; border-radius: 22px; }
+      #loading .title { font-size: 22px; font-weight: 700; color: #f2d488; letter-spacing: 1px; }
+      #loading .bar { width: min(320px, 70vw); height: 8px; border-radius: 4px; background: #1c2a25; overflow: hidden; }
+      #bar-full { width: 0; height: 100%; background: linear-gradient(90deg, #c99a3e, #f2d488); transition: width .2s; }
+      #loading-text { font-size: 13px; opacity: .75; }
+      #fs-btn {
+        position: fixed; z-index: 6; display: none;
+        left: calc(env(safe-area-inset-left, 0px) + 10px); bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+        width: 44px; height: 44px; border-radius: 10px; border: 1px solid #c99a3e88;
+        background: #0b1916cc; color: #f2d488; font-size: 22px; line-height: 42px; padding: 0; cursor: pointer;
+      }
+      #ios-hint {
+        position: fixed; z-index: 7; display: none; left: 50%; transform: translateX(-50%);
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); width: min(560px, 92vw); box-sizing: border-box;
+        padding: 12px 14px; border-radius: 12px; background: #0b1916f2; border: 1px solid #c99a3e;
+        font-size: 14px; line-height: 1.45; box-shadow: 0 6px 24px #000a;
+      }
+      #ios-hint b { color: #f2d488; }
+      #ios-hint button {
+        margin-top: 8px; float: right; border: 0; border-radius: 8px; padding: 6px 14px;
+        background: #c99a3e; color: #13110a; font-weight: 700; font-size: 14px;
+      }
+      #warning { position: fixed; z-index: 8; left: 0; right: 0; top: 0; display: none; text-align: center; font-size: 14px; }
+      #warning div { padding: 10px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="loading">
+      <img src="TemplateData/icon-192.png" alt="">
+      <div class="title">SƠN THỦY</div>
+      <div class="bar"><div id="bar-full"></div></div>
+      <div id="loading-text">Đang tải… 0%</div>
+    </div>
+    <button id="fs-btn" title="Toàn màn hình" aria-label="Toàn màn hình">⛶</button>
+    <div id="ios-hint">
+      <b>Chơi toàn màn hình trên iPhone:</b> bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên lên) → <b>Thêm vào MH chính</b>,
+      rồi mở <b>Sơn Thủy</b> từ biểu tượng ngoài màn hình chính – game sẽ không còn thanh địa chỉ của Safari.
+      <br><button id="ios-close">Đã hiểu</button>
+    </div>
+    <div id="warning"></div>
+    <script>
+      var canvas = document.querySelector("#unity-canvas");
+      var loading = document.querySelector("#loading");
+      var barFull = document.querySelector("#bar-full");
+      var loadingText = document.querySelector("#loading-text");
+      var warning = document.querySelector("#warning");
+      var fsBtn = document.querySelector("#fs-btn");
+      var iosHint = document.querySelector("#ios-hint");
+
+      var ua = navigator.userAgent;
+      var isIOS = /iPhone|iPod|iPad/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      var isMobile = isIOS || /Android/i.test(ua);
+      var standalone = navigator.standalone === true ||
+        window.matchMedia("(display-mode: fullscreen)").matches || window.matchMedia("(display-mode: standalone)").matches;
+      var fsSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+
+      function store(key, val) { try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (e) { return null; } }
+
+      // ---- Android / iPad / máy tính: nút toàn màn hình (+ khóa màn ngang trên điện thoại)
+      function isFullscreen() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+      function enterFullscreen() {
+        var el = document.documentElement;
+        var req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (!req) return;
+        try {
+          var p = req.call(el, { navigationUI: "hide" });
+          var lock = function () { if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(function () {}); };
+          if (p && p.then) p.then(lock).catch(function () {}); else lock();
+        } catch (e) {}
+      }
+      function refreshFsButton() { fsBtn.style.display = (fsSupported && !standalone && !isFullscreen()) ? "block" : "none"; }
+      fsBtn.addEventListener("click", function (e) { e.stopPropagation(); enterFullscreen(); });
+      document.addEventListener("fullscreenchange", refreshFsButton);
+      document.addEventListener("webkitfullscreenchange", refreshFsButton);
+      // điện thoại Android: lần chạm đầu tiên vào game tự bật toàn màn hình (trình duyệt chỉ cho khi người dùng chạm)
+      var autoFsDone = false;
+      if (isMobile && !isIOS && fsSupported && !standalone) {
+        canvas.addEventListener("touchend", function () { if (!autoFsDone && !isFullscreen()) { autoFsDone = true; enterFullscreen(); } }, { passive: true });
+      }
+
+      // ---- iPhone: Safari không cho trang tự bật toàn màn hình → hướng dẫn "Thêm vào MH chính"
+      if (isIOS && !standalone && !fsSupported && store("sonthuy-ios-hint") !== "1") iosHint.style.display = "block";
+      document.querySelector("#ios-close").addEventListener("click", function () { iosHint.style.display = "none"; store("sonthuy-ios-hint", "1"); });
+
+      function unityShowBanner(msg, type) {
+        var div = document.createElement("div");
+        div.innerHTML = msg;
+        div.style.background = type == "error" ? "#b3261e" : "#c9a43e";
+        div.style.color = type == "error" ? "#fff" : "#13110a";
+        warning.appendChild(div);
+        warning.style.display = "block";
+        if (type != "error") setTimeout(function () { warning.removeChild(div); if (!warning.children.length) warning.style.display = "none"; }, 5000);
+      }
+
+      var buildUrl = "Build";
+      var loaderUrl = buildUrl + "/WebGL_Full.loader.js";
+      var config = {
+        arguments: [],
+        dataUrl: buildUrl + "/WebGL_Full.data.unityweb",
+        frameworkUrl: buildUrl + "/WebGL_Full.framework.js.unityweb",
+        codeUrl: buildUrl + "/WebGL_Full.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "DefaultCompany",
+        productName: "Sơn Thủy",
+        productVersion: "1.0",
+        autoSyncPersistentDataPath: true,
+        showBanner: unityShowBanner,
+      };
+      // điện thoại màn hình 3x: vẽ ở 2x cho nhẹ máy, nhìn gần như không khác
+      if (isMobile) config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+
+      refreshFsButton();
+      var script = document.createElement("script");
+      script.src = loaderUrl;
+      script.onload = function () {
+        createUnityInstance(canvas, config, function (progress) {
+          var pct = Math.round(100 * progress);
+          barFull.style.width = pct + "%";
+          loadingText.textContent = (pct < 90 ? "Đang tải… " : "Đang mở game… ") + pct + "%" + (pct < 90 ? " · lần đầu khoảng 100 MB" : "");
+        }).then(function () {
+          loading.style.display = "none";
+        }).catch(function (message) {
+          unityShowBanner("Không mở được game: " + message, "error");
+        });
+      };
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>

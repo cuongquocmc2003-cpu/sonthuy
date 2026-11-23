@@ -1,0 +1,16 @@
+{
+  "name": "Sơn Thủy Chess",
+  "short_name": "Sơn Thủy",
+  "description": "Cờ chiến thuật 2 người theo truyền thuyết Sơn Tinh – Thủy Tinh.",
+  "lang": "vi",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#050a09",
+  "theme_color": "#050a09",
+  "icons": [
+    { "src": "TemplateData/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "TemplateData/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
