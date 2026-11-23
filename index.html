@@ -58,6 +58,18 @@
       }
       #warning { position: fixed; z-index: 8; left: 0; right: 0; top: 0; display: none; text-align: center; font-size: 14px; }
       #warning div { padding: 10px; }
+      /* bảng báo lỗi: hiện khi game lỗi / bị đóng đột ngột / chưa vào được sau 60 giây – người chơi chụp màn hình gửi lại */
+      #diag {
+        position: fixed; z-index: 9; display: none; overflow: auto; box-sizing: border-box;
+        left: calc(env(safe-area-inset-left, 0px) + 8px); right: calc(env(safe-area-inset-right, 0px) + 8px);
+        top: calc(env(safe-area-inset-top, 0px) + 8px); bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+        padding: 10px 12px; border-radius: 10px; background: #0b1916f5; border: 1px solid #c99a3e;
+        font-size: 12px; line-height: 1.4; -webkit-user-select: text; user-select: text;
+      }
+      #diag h3 { margin: 0 0 6px; font-size: 15px; color: #f2d488; }
+      #diag pre { margin: 6px 0; white-space: pre-wrap; word-break: break-word; font-size: 11px; color: #cfd8cf; }
+      #diag button { margin: 4px 6px 0 0; border: 0; border-radius: 8px; padding: 7px 12px; font-weight: 700; font-size: 13px; background: #c99a3e; color: #13110a; }
+      #diag button.ghost { background: #1c2a25; color: #e8e4d0; }
     </style>
   </head>
   <body>
@@ -75,6 +87,42 @@
       <br><button id="ios-close">Đã hiểu</button>
     </div>
     <div id="warning"></div>
+    <div id="diag">
+      <h3 id="diag-title">Sơn Thủy gặp sự cố</h3>
+      <div>Chụp màn hình bảng này gửi cho người làm game. Có thể bấm <b>Thử lại (chế độ nhẹ)</b> – đồ họa nét kém hơn nhưng tốn ít bộ nhớ.</div>
+      <button id="diag-safe">Thử lại (chế độ nhẹ)</button><button id="diag-close" class="ghost">Đóng</button>
+      <pre id="diag-info"></pre>
+    </div>
+    <script>
+      // ---- nhật ký + phát hiện sự cố (chạy trước mọi thứ khác)
+      var BOOT_KEY = "sonthuy-boot";
+      var bootStart = Date.now(), phase = "tải trang", gameReady = false, errorCount = 0, logs = [];
+      var prevBoot = null;
+      try { prevBoot = JSON.parse(localStorage.getItem(BOOT_KEY) || "null"); } catch (e) {}
+      // lần trước chưa tới "ready" mà đã mất (iPhone đóng trang khi hết bộ nhớ rồi tải lại) → tự bật chế độ nhẹ
+      var crashedBefore = !!(prevBoot && prevBoot.phase !== "ready" && Date.now() - prevBoot.t < 15 * 60 * 1000);
+      var safeMode = /[?&]safe=1/.test(location.search) || crashedBefore;
+      function setPhase(p) {
+        phase = p;
+        try { localStorage.setItem(BOOT_KEY, JSON.stringify({ t: Date.now(), phase: p, safe: safeMode })); } catch (e) {}
+      }
+      function addLog(kind, args) {
+        var s = Array.prototype.map.call(args, function (a) {
+          try { return typeof a === "string" ? a : (a && a.message) ? a.message : JSON.stringify(a); } catch (e) { return String(a); }
+        }).join(" ");
+        logs.push(((Date.now() - bootStart) / 1000).toFixed(1) + "s " + kind + " " + s.trim().slice(0, 260));
+        if (logs.length > 60) logs.shift();
+        if (s.indexOf("[SonThuy] ready") >= 0) { gameReady = true; setPhase("ready"); }
+        if (kind === "ERR") errorCount++;
+      }
+      ["log", "info", "warn", "error"].forEach(function (k) {
+        var orig = console[k];
+        console[k] = function () { addLog(k === "error" ? "ERR" : k === "warn" ? "WARN" : "LOG", arguments); return orig.apply(console, arguments); };
+      });
+      window.addEventListener("error", function (e) { addLog("ERR", [e.message + " @" + (e.filename || "").split("/").pop() + ":" + (e.lineno || "")]); if (window.showDiag) window.showDiag("Lỗi khi chạy game"); });
+      window.addEventListener("unhandledrejection", function (e) { addLog("ERR", ["promise: " + (e.reason && (e.reason.message || e.reason))]); });
+      setPhase("tải trang");
+    </script>
     <script>
       var canvas = document.querySelector("#unity-canvas");
       var loading = document.querySelector("#loading");
@@ -119,7 +167,35 @@
       if (isIOS && !standalone && !fsSupported && store("sonthuy-ios-hint") !== "1") iosHint.style.display = "block";
       document.querySelector("#ios-close").addEventListener("click", function () { iosHint.style.display = "none"; store("sonthuy-ios-hint", "1"); });
 
+      // ---- bảng báo lỗi
+      var diag = document.querySelector("#diag");
+      window.showDiag = function (title) {
+        document.querySelector("#diag-title").textContent = "Sơn Thủy: " + title;
+        var c = canvas.getBoundingClientRect();
+        var info = [
+          "Bước: " + phase + " · " + ((Date.now() - bootStart) / 1000).toFixed(0) + " giây · lỗi: " + errorCount + (safeMode ? " · CHẾ ĐỘ NHẸ" : ""),
+          "Bản: 1.0 · " + (standalone ? "mở từ màn hình chính" : "trong trình duyệt") + (crashedBefore ? " · lần trước bị đóng ở bước \"" + prevBoot.phase + "\"" : ""),
+          "Màn hình: " + window.innerWidth + "×" + window.innerHeight + " @" + (+(window.devicePixelRatio || 1).toFixed(2)) + "x · canvas " + Math.round(c.width) + "×" + Math.round(c.height) + " (" + canvas.width + "×" + canvas.height + ")",
+          ua.slice(0, 160),
+          "— nhật ký (mới nhất trước) —"
+        ].concat(logs.slice(-25).reverse()).join("\n");
+        document.querySelector("#diag-info").textContent = info;
+        diag.style.display = "block";
+      };
+      document.querySelector("#diag-close").addEventListener("click", function () { diag.style.display = "none"; });
+      document.querySelector("#diag-safe").addEventListener("click", function () {
+        try { localStorage.removeItem(BOOT_KEY); } catch (e) {}
+        location.href = location.pathname + "?safe=1";
+      });
+      canvas.addEventListener("webglcontextlost", function () { addLog("ERR", ["WebGL context lost"]); showDiag("mất đồ họa (thường do điện thoại hết bộ nhớ)"); }, false);
+      if (crashedBefore) addLog("WARN", ["lần trước game bị đóng ở bước: " + prevBoot.phase + " → bật chế độ nhẹ"]);
+      // chưa vào được màn chính sau 90 giây kể từ khi engine chạy → hiện bảng (người chơi vẫn đóng được)
+      function armWatchdog() {
+        setTimeout(function () { if (!gameReady) showDiag("chưa vào được màn chính sau 90 giây"); }, 90000);
+      }
+
       function unityShowBanner(msg, type) {
+        addLog(type == "error" ? "ERR" : "WARN", ["banner: " + msg]);
         var div = document.createElement("div");
         div.innerHTML = msg;
         div.style.background = type == "error" ? "#b3261e" : "#c9a43e";
@@ -140,24 +216,31 @@
         companyName: "DefaultCompany",
         productName: "Sơn Thủy",
         productVersion: "1.0",
-        autoSyncPersistentDataPath: true,
         showBanner: unityShowBanner,
       };
-      // điện thoại màn hình 3x: vẽ ở 2x cho nhẹ máy, nhìn gần như không khác
-      if (isMobile) config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      // điện thoại màn hình 3x: vẽ ở 2x cho nhẹ máy, nhìn gần như không khác; chế độ nhẹ: 1x
+      if (isMobile) config.devicePixelRatio = Math.min(window.devicePixelRatio || 1, safeMode ? 1 : 2);
 
       refreshFsButton();
       var script = document.createElement("script");
       script.src = loaderUrl;
+      script.onerror = function () { addLog("ERR", ["không tải được " + loaderUrl]); showDiag("không tải được game (mạng?)"); };
       script.onload = function () {
+        setPhase("tải dữ liệu");
+        var shownPhase = "";
         createUnityInstance(canvas, config, function (progress) {
           var pct = Math.round(100 * progress);
           barFull.style.width = pct + "%";
-          loadingText.textContent = (pct < 90 ? "Đang tải… " : "Đang mở game… ") + pct + "%" + (pct < 90 ? " · lần đầu khoảng 100 MB" : "");
+          loadingText.textContent = (pct < 90 ? "Đang tải… " : "Đang mở game… ") + pct + "%" + (pct < 90 ? " · lần đầu khoảng 100 MB" : "") + (safeMode ? " · chế độ nhẹ" : "");
+          var p = pct < 90 ? "tải dữ liệu" : "giải nén / khởi động engine";
+          if (p !== shownPhase) { shownPhase = p; setPhase(p); }
         }).then(function () {
           loading.style.display = "none";
+          if (!gameReady) setPhase("intro / dựng bàn cờ");
+          armWatchdog();
         }).catch(function (message) {
-          unityShowBanner("Không mở được game: " + message, "error");
+          addLog("ERR", ["createUnityInstance: " + message]);
+          showDiag("không mở được game");
         });
       };
       document.body.appendChild(script);
